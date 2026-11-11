@@ -54,8 +54,12 @@ struct CertificatesView: View {
 						Button {
 							_isAddingPresenting = true
 						} label: {
-							NBButton(.localized("Import"), style: .text)
+							Label(.localized("Import"), systemImage: "plus")
+								.font(.headline)
+								.padding(.horizontal, 20)
 						}
+						.signaProminentButton()
+						.controlSize(.large)
 					}
 				}
 			}
@@ -108,16 +112,9 @@ extension CertificatesView {
 				cert: cert
 			)
 			.padding()
-			.background(
-				RoundedRectangle(cornerRadius: cornerRadius)
-					.fill(Color(uiColor: .quaternarySystemFill))
-			)
-			.overlay(
-				RoundedRectangle(cornerRadius: cornerRadius)
-					.strokeBorder(
-						_selectedCertBinding.wrappedValue == index ? Color.accentColor : Color.clear,
-						lineWidth: 2
-					)
+			.signaGlassCard(
+				cornerRadius: cornerRadius,
+				selected: _selectedCertBinding.wrappedValue == index
 			)
 			.contextMenu {
 				_contextActions(for: cert)

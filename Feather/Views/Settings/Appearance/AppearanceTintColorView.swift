@@ -9,11 +9,11 @@ import SwiftUI
 
 // MARK: - View
 struct AppearanceTintColorView: View {
-	@AppStorage("Feather.userTintColor") private var _selectedColorHex: String = "#848ef9"
+	@AppStorage("Feather.userTintColor") private var _selectedColorHex: String = "#FF6F1A"
 	private let _tintOptions: [(name: String, hex: String)] = [
-		("Default", 		"#848ef9"),
-		("V2", 				"#B496DC"),
-		("Berry",   		"#ff7a83"),
+		("Signa Orange", 	"#FF6F1A"),
+		("Apricot", 		"#FF9F5A"),
+		("Coral",   		"#FF655A"),
 		("Cool Blue", 		"#4161F1"),
 		("Fuchsia", 		"#FF00FF"),
 		("Protokolle", 		"#4CD964"),
