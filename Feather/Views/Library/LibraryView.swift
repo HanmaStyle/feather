@@ -135,8 +135,12 @@ struct LibraryView: View {
 							Menu {
 								_importActions()
 							} label: {
-								NBButton(.localized("Import"), style: .text)
+								Label(.localized("Import"), systemImage: "square.and.arrow.down")
+									.font(.headline)
+									.padding(.horizontal, 20)
 							}
+							.signaProminentButton()
+							.controlSize(.large)
 						}
 					}
 				}
