@@ -73,6 +73,7 @@ struct ExtendedTabbarView: View {
 		}
 		.tabViewStyle(.sidebarAdaptable)
 		.tabViewCustomization($customization)
+		.modifier(SignaTabBarBehavior())
 		.sheet(isPresented: $_isAddingPresenting) {
 			SourcesAddView()
 				.presentationDetents([.medium])
@@ -104,4 +105,3 @@ struct ExtendedTabbarView: View {
 		Image(systemName: "app.dashed")
 	}
 }
-

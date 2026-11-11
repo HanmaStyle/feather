@@ -31,6 +31,8 @@ struct DownloadHeaderView: View {
 							}
 						}
 					}
+					.padding(14)
+					.signaGlassCard(cornerRadius: 22)
 					.padding(.horizontal)
 				}
 				.transition(.move(edge: .top).combined(with: .opacity))

@@ -44,15 +44,14 @@ enum TabEnum: String, CaseIterable, Hashable {
 	
 	static var defaultTabs: [TabEnum] {
 		return [
-			.sources,
 			.library,
+			.certificates,
+			.sources,
 			.settings
 		]
 	}
 	
 	static var customizableTabs: [TabEnum] {
-		return [
-			.certificates
-		]
+		return []
 	}
 }
