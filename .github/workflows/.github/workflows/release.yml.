@@ -1,0 +1,191 @@
+name: Build Signa IPA
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: signa-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APP_NAME: Signa
+  BUNDLE_ID: com.hanmastyle.signa
+
+jobs:
+  build:
+    name: Build and package Signa
+    runs-on: xcode-27
+    timeout-minutes: 60
+    outputs:
+      signed: ${{ steps.package.outputs.signed }}
+      ipa_path: ${{ steps.package.outputs.ipa_path }}
+      version: ${{ steps.package.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          uname -m
+          xcodebuild -version
+          python3 --version
+
+      - name: Apply Signa source overlay
+        run: |
+          set -euo pipefail
+          test -f signa-overlay.b64
+          base64 -D -i signa-overlay.b64 -o /tmp/signa-overlay.zip
+          rm -rf /tmp/signa-overlay
+          mkdir -p /tmp/signa-overlay
+          ditto -x -k /tmp/signa-overlay.zip /tmp/signa-overlay
+          rsync -a --exclude='.github/workflows/' /tmp/signa-overlay/ ./
+          test -f Feather.xcodeproj/project.pbxproj
+          test -f Feather/Resources/Info.plist
+          grep -q 'com.hanmastyle.signa' Feather/Resources/Info.plist
+
+      - name: Generate Signa icons
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user Pillow
+          python3 Scripts/generate_icons.py
+          test -f Feather/Resources/Assets.xcassets/AppIcon.appiconset/signa.png
+          test -f Feather/Resources/Assets.xcassets/AppIcon.appiconset/signa_dark.png
+          test -f Feather/Resources/Assets.xcassets/AppIcon.appiconset/signa_tint.png
+
+      - name: Build unsigned app
+        run: |
+          set -euo pipefail
+          make iphoneos
+          test -d _build/Payload/Signa.app
+          test -f packages/Signa-unsigned.ipa
+
+      - name: Sign with user certificate when secrets exist
+        id: sign
+        env:
+          SIGNING_P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
+          SIGNING_P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+          SIGNING_MOBILEPROVISION_BASE64: ${{ secrets.SIGNING_MOBILEPROVISION_BASE64 }}
+        run: |
+          set -euo pipefail
+          APP="$PWD/_build/Payload/Signa.app"
+
+          if [ -z "${SIGNING_P12_BASE64:-}" ] || [ -z "${SIGNING_P12_PASSWORD:-}" ] || [ -z "${SIGNING_MOBILEPROVISION_BASE64:-}" ]; then
+            echo "Signing secrets are not configured; keeping the artifact unsigned."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          KEYCHAIN="signa-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          P12_PATH="/tmp/signa-signing.p12"
+          PROFILE_PATH="/tmp/signa.mobileprovision"
+          PROFILE_PLIST="/tmp/signa-profile.plist"
+          ENTITLEMENTS="/tmp/signa-entitlements.plist"
+
+          cleanup() {
+            security delete-keychain "$KEYCHAIN" >/dev/null 2>&1 || true
+            rm -f "$P12_PATH" "$PROFILE_PATH" "$PROFILE_PLIST" "$ENTITLEMENTS"
+          }
+          trap cleanup EXIT
+
+          printf '%s' "$SIGNING_P12_BASE64" | base64 -D -o "$P12_PATH"
+          printf '%s' "$SIGNING_MOBILEPROVISION_BASE64" | base64 -D -o "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security import "$P12_PATH" -k "$KEYCHAIN" -P "$SIGNING_P12_PASSWORD" -A -t agg -f pkcs12
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk -F '"' '/[0-9]+\)/ { print $2; exit }')"
+          if [ -z "$IDENTITY" ]; then
+            echo "No codesigning identity found in the supplied P12."
+            exit 1
+          fi
+          echo "Using codesigning identity: $IDENTITY"
+
+          security cms -D -i "$PROFILE_PATH" -o "$PROFILE_PLIST"
+          TEAM_ID="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$PROFILE_PLIST")"
+          PROFILE_APP_ID="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$PROFILE_PLIST")"
+          EXPECTED_APP_ID="$TEAM_ID.$BUNDLE_ID"
+          if [ "$PROFILE_APP_ID" != "$EXPECTED_APP_ID" ]; then
+            echo "Provisioning profile application-identifier is $PROFILE_APP_ID, expected $EXPECTED_APP_ID."
+            exit 1
+          fi
+
+          cp "$PROFILE_PATH" "$APP/embedded.mobileprovision"
+          /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' "$PROFILE_PLIST" > "$ENTITLEMENTS"
+
+          find "$APP" \( -name '*.framework' -o -name '*.dylib' -o -name '*.appex' \) -depth -print0 |
+            while IFS= read -r -d '' item; do
+              codesign --force --sign "$IDENTITY" --timestamp=none --generate-entitlement-der "$item"
+            done
+
+          codesign --force --sign "$IDENTITY" --timestamp=none --generate-entitlement-der --entitlements "$ENTITLEMENTS" "$APP"
+          codesign --verify --deep --strict --verbose=4 "$APP"
+          codesign -d --entitlements :- "$APP" >/dev/null
+
+          rm -f packages/Signa.ipa
+          ditto -c -k --sequesterRsrc --keepParent _build/Payload packages/Signa.ipa
+          test -f packages/Signa.ipa
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve artifact metadata
+        id: package
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+            VERSION="$(grep -E '^FEATHER_PROJECT_VERSION=' Feather.xcconfig | cut -d= -f2 | tr -d '[:space:]')"
+          fi
+          if [ "${{ steps.sign.outputs.signed }}" = "true" ] && [ -f packages/Signa.ipa ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "ipa_path=packages/Signa.ipa" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "ipa_path=packages/Signa-unsigned.ipa" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved Signa version: $VERSION"
+
+      - name: Upload signed IPA
+        if: steps.package.outputs.signed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Signa-v${{ steps.package.outputs.version }}-signed
+          path: ${{ steps.package.outputs.ipa_path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload unsigned IPA
+        if: steps.package.outputs.signed != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Signa-v${{ steps.package.outputs.version }}-unsigned
+          path: ${{ steps.package.outputs.ipa_path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: ${{ steps.package.outputs.ipa_path }}
+          name: Signa v${{ steps.package.outputs.version }}
+          body: |
+            Signa ${{ steps.package.outputs.version }}
+            Signed artifact: ${{ steps.package.outputs.signed }}
