@@ -67,10 +67,14 @@ struct SigningView: View {
 							Button {
 								_start()
 							} label: {
-								NBSheetButton(title: .localized("Start Signing"), style: .prominent)
-									.padding()
+								Label(.localized("Start Signing"), systemImage: "signature")
+									.font(.headline)
+									.frame(maxWidth: .infinity)
+									.padding(.horizontal, 24)
 							}
-							.buttonStyle(.plain)
+							.signaProminentButton()
+							.controlSize(.large)
+							.padding(.horizontal, 24)
 							.offset(y: UIDevice.current.userInterfaceIdiom == .pad ? -20 : -40)
 						}
 				}
@@ -80,10 +84,9 @@ struct SigningView: View {
 			.toolbar {
 				NBToolbarButton(role: .dismiss)
 				ToolbarItem(placement: .principal) {
-					Image("Glyph")
-						.resizable()
-						.scaledToFit()
-						.frame(height: 38)
+					Text("Signa")
+						.font(.headline.weight(.semibold))
+						.foregroundStyle(SignaTheme.accent)
 				}
 				NBToolbarButton(
 					.localized("Reset"),
