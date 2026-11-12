@@ -58,7 +58,7 @@ jobs:
       - name: Generate Signa icons
         run: |
           set -euo pipefail
-          python3 -m pip install --user Pillow
+          python3 -m pip install --user Pillow || python3 -m pip install --user --break-system-packages Pillow
           python3 Scripts/generate_icons.py
           test -f Feather/Resources/Assets.xcassets/AppIcon.appiconset/signa.png
           test -f Feather/Resources/Assets.xcassets/AppIcon.appiconset/signa_dark.png
